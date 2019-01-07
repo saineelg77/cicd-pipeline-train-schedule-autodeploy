@@ -3,6 +3,7 @@ pipeline {
     environment {
         //be sure to replace "willbla" with your own Docker Hub username
         DOCKER_IMAGE_NAME = "saineelg/train-schedule"
+        CANARY_REPLICAS = 0
     }
     stages {
         stage('Build') {
@@ -53,15 +54,30 @@ pipeline {
                 )
             }
         }
+        stage('SmokeTest') {
+            when {
+                branch 'master'         
+        }
+            steps {
+                script {
+                    sleep (time: 5)
+                    def response = httpRequest (
+                        url: "http://$KUBE_MASTER_IP:8081/",
+                        TIMEOUT: 30
+                    )
+                    IF (RESPONSE.STATUS != 200) {
+                        ERROR("Smoke Test aganist canary deployment failed.")
+                    }
+                }
+            }
+        }
+            
         stage('DeployToProduction') {
             when {
                 branch 'master'
             }
-            environment { 
-                CANARY_REPLICAS = 0
-            }
+            
             steps {
-                input 'Deploy to Production?'
                 milestone(1)
                 kubernetesDeploy(
                     kubeconfigId: 'kubeconfig',
@@ -76,4 +92,14 @@ pipeline {
             }
         }
     }
+    post {
+        cleanup {
+            kubernetesDeploy(
+                kubeconfigId: 'kubeconfig',
+                configs: 'train-schedule-kube-canary.yml',
+                enableConfigSubstitution: true
+              )
+        }
+    }         
+          
 }
